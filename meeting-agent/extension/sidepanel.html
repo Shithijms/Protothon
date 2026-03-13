@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meeting Agent</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-title">
+      <span class="logo">🤖</span>
+      <h1>Meeting Agent</h1>
+    </div>
+    <span id="status-dot" class="status-dot inactive" title="Inactive"></span>
+  </header>
+
+  <!-- ── Tab bar ─────────────────────────────────────── -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="live">Live</button>
+    <button class="tab-btn" data-tab="board">Board</button>
+    <button class="tab-btn" data-tab="report">Report</button>
+  </nav>
+
+  <!-- ── Live tab ────────────────────────────────────── -->
+  <section id="tab-live" class="tab-panel active">
+    <h3 class="section-label">Transcript</h3>
+    <div id="transcript-view" class="transcript-scroll"></div>
+
+    <h3 class="section-label">Extracted Tasks</h3>
+    <div id="live-tasks" class="live-tasks"></div>
+  </section>
+
+  <!-- ── Board tab ───────────────────────────────────── -->
+  <section id="tab-board" class="tab-panel">
+    <div class="board">
+      <div class="board-col">
+        <h3 class="col-header todo-header">📋 Todo</h3>
+        <div id="col-todo" class="col-body"></div>
+      </div>
+      <div class="board-col">
+        <h3 class="col-header inprog-header">🔄 In Progress</h3>
+        <div id="col-inprogress" class="col-body"></div>
+      </div>
+      <div class="board-col">
+        <h3 class="col-header done-header">✅ Done</h3>
+        <div id="col-done" class="col-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Report tab ──────────────────────────────────── -->
+  <section id="tab-report" class="tab-panel">
+    <div id="report-view" class="report-view">
+      <p class="placeholder-text">Report will appear after the meeting ends.</p>
+    </div>
+    <button id="btn-export" class="btn-export">Export JSON</button>
+  </section>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

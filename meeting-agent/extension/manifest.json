@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "AI Meeting Agent",
+  "version": "1.0",
+  "description": "Silent AI agent that captures and extracts tasks from meetings",
+  "permissions": [
+    "tabCapture",
+    "tabs",
+    "activeTab",
+    "offscreen",
+    "sidePanel",
+    "storage",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://app.zoom.us/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://app.zoom.us/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Enable Meeting Agent",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

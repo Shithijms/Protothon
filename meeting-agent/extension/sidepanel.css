@@ -1,0 +1,350 @@
+/* ── Side Panel — Dark Theme ──────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* ── Header ──────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #16213e;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-title .logo {
+  font-size: 18px;
+}
+
+.header-title h1 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+/* Status indicator dot */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: background 0.3s;
+}
+
+.status-dot.active {
+  background: #0f6e56;
+  box-shadow: 0 0 6px #0f6e56;
+}
+
+.status-dot.inactive {
+  background: #555;
+}
+
+/* ── Tab bar ─────────────────────────────────────────── */
+
+.tab-bar {
+  display: flex;
+  border-bottom: 1px solid #2a2a4a;
+  background: #16213e;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s, border-bottom 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+  color: #c0c0c0;
+}
+
+.tab-btn.active {
+  color: #0f6e56;
+  border-bottom: 2px solid #0f6e56;
+}
+
+/* ── Tab panels ──────────────────────────────────────── */
+
+.tab-panel {
+  display: none;
+  padding: 10px 14px;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+/* ── Section labels ──────────────────────────────────── */
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #777;
+  margin: 10px 0 6px 0;
+}
+
+/* ── Live tab — Transcript ───────────────────────────── */
+
+.transcript-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  background: #0f0f23;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 10px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 11px;
+  color: #b0b0b0;
+}
+
+.transcript-line {
+  padding: 2px 0;
+  border-bottom: 1px solid #1a1a30;
+}
+
+.transcript-line:last-child {
+  border-bottom: none;
+  color: #e0e0e0;
+}
+
+/* Visual tag lines */
+.transcript-line.visual {
+  color: #4fc3f7;
+}
+
+/* ── Live tab — Task cards ───────────────────────────── */
+
+.live-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.task-card {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 10px;
+  transition: border-color 0.2s;
+}
+
+.task-card:hover {
+  border-color: #0f6e56;
+}
+
+.task-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f0f0f0;
+  margin-bottom: 4px;
+}
+
+.task-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Badges */
+.badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.badge-priority-high {
+  background: #5c1a1a;
+  color: #ff6b6b;
+}
+
+.badge-priority-medium {
+  background: #4a3a1a;
+  color: #ffc107;
+}
+
+.badge-priority-low {
+  background: #1a3a2a;
+  color: #66bb6a;
+}
+
+.badge-source {
+  background: #1a2a3a;
+  color: #4fc3f7;
+}
+
+.badge-assignee {
+  background: #2a1a3a;
+  color: #ce93d8;
+}
+
+/* ── Board tab — Kanban columns ──────────────────────── */
+
+.board {
+  display: flex;
+  gap: 8px;
+}
+
+.board-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.col-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  padding: 6px;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: 4px;
+}
+
+.todo-header {
+  background: #1a2a3a;
+  color: #4fc3f7;
+}
+
+.inprog-header {
+  background: #3a2a1a;
+  color: #ffc107;
+}
+
+.done-header {
+  background: #1a3a2a;
+  color: #66bb6a;
+}
+
+.col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 60px;
+  background: #0f0f23;
+  border: 1px solid #2a2a4a;
+  border-radius: 0 0 6px 6px;
+  padding: 6px;
+}
+
+/* Board task cards — compact */
+.board-card {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  cursor: grab;
+}
+
+.board-card .task-title {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+/* ── Report tab ──────────────────────────────────────── */
+
+.report-view {
+  background: #0f0f23;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.placeholder-text {
+  color: #555;
+  text-align: center;
+  padding: 40px 0;
+}
+
+.report-section {
+  margin-bottom: 14px;
+}
+
+.report-section h4 {
+  font-size: 12px;
+  color: #0f6e56;
+  margin-bottom: 4px;
+}
+
+.report-section p,
+.report-section li {
+  color: #c0c0c0;
+  font-size: 11px;
+}
+
+.report-section ul {
+  padding-left: 16px;
+}
+
+.btn-export {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+  background: #0f6e56;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-export:hover {
+  background: #0d5a47;
+}
+
+/* ── Scrollbar styling ───────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a4a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a5a;
+}
