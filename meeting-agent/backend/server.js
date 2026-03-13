@@ -134,6 +134,17 @@ app.post("/meeting/start", (req, res) => {
   res.json({ ok: true });
 });
 
+// ──────────────────────────────────────────────────────────
+// 7. POST /caption — receive fallback captions from extension
+// ──────────────────────────────────────────────────────────
+app.post("/caption", (req, res) => {
+  const { text } = req.body;
+  if (meetingActive && text && text.trim().length > 0) {
+    rollingTranscript.push(`[CAPTION]: ${text.trim()}`);
+  }
+  res.json({ ok: true });
+});
+
 // ── Start server ─────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
