@@ -10,7 +10,6 @@ const Groq = require("groq-sdk");
 const groqSTT = require("./services/groq-stt");
 const groqVision = require("./services/groq-vision");
 const groqExtract = require("./services/groq-extract");
-// FIX (Bug 2): Import shouldSendScreenshot and actually use it below
 const { shouldSendScreenshot, classifyRegion } = require("./services/diffEngine");
 
 const app = express();
@@ -28,27 +27,22 @@ let rollingTranscript = [];
 let tasks = [];
 let meetingActive = false;
 let report = null;
+let lastExtractedIndex = 0; // <--- ADD THIS
 
-// FIX (Bug 2): Track previous screenshot to diff against
 let previousScreenshotBase64 = null;
-
-// FIX (Bug 1): Rolling extraction timer handle
 let extractionTimer = null;
 
-// ── Groq client (for /test route) ────────────────────────
+// ── Groq client ──────────────────────────────────────────
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ── Rolling extraction — called every 2 minutes ──────────
-// FIX (Bug 1): This function was never called before. It now runs on an
-// interval started by /meeting/start and stopped by /meeting/end.
 function startRollingExtraction() {
-  stopRollingExtraction(); // clear any stale timer
-
-  // Run immediately once, then every 2 minutes
+  stopRollingExtraction(); 
   runWindowExtraction();
-  extractionTimer = setInterval(runWindowExtraction, 2 * 60 * 1000);
+  
+  // Changed to 1 minute (60 * 1000)
+  extractionTimer = setInterval(runWindowExtraction, 30 * 1000); 
 }
-
 function stopRollingExtraction() {
   if (extractionTimer) {
     clearInterval(extractionTimer);
@@ -57,22 +51,36 @@ function stopRollingExtraction() {
 }
 
 async function runWindowExtraction() {
-  if (!meetingActive || rollingTranscript.length === 0) return;
+  // ---> FIX 1: Stop if there is no NEW text to read!
+  if (!meetingActive || rollingTranscript.length === lastExtractedIndex) return;
 
   try {
-    // Use the last 5 minutes worth of transcript lines (approx 10 lines per minute)
-    const windowLines = rollingTranscript.slice(-50);
-    const window = windowLines.join("\n");
+    // Only grab the lines that have appeared since the last time this ran
+    const newLines = rollingTranscript.slice(lastExtractedIndex);
+    lastExtractedIndex = rollingTranscript.length; // Move the bookmark forward
+    
+    let window = newLines.join("\n");
+
+    if (window.length > 12000) {
+      window = window.substring(window.length - 12000);
+    }
 
     const result = await groqExtract.extractFromWindow(window);
 
-    // Merge new action items into tasks, avoiding exact-title duplicates
+    // ---> FIX 2: "Fuzzy" Deduplication
     if (result && Array.isArray(result.actionItems)) {
-      const existingTitles = new Set(tasks.map((t) => t.title));
       for (const item of result.actionItems) {
-        if (!existingTitles.has(item.title)) {
+        const incomingTitle = (item.title || "").toLowerCase();
+        
+        // Check if a task with a very similar name already exists
+        const isDuplicate = tasks.some(t => {
+          const existingTitle = (t.title || "").toLowerCase();
+          // If the new task name is inside the old one, or vice-versa, it's a duplicate
+          return existingTitle.includes(incomingTitle) || incomingTitle.includes(existingTitle);
+        });
+
+        if (!isDuplicate && incomingTitle.length > 2) {
           tasks.push(item);
-          existingTitles.add(item.title);
         }
       }
     }
@@ -81,14 +89,13 @@ async function runWindowExtraction() {
     console.error("[rolling-extract] Error:", err.message);
   }
 }
-
 // ──────────────────────────────────────────────────────────
-// 1. GET /test — quick healthcheck via Groq LLaMA
+// 1. GET /test — quick healthcheck via Groq
 // ──────────────────────────────────────────────────────────
 app.get("/test", async (req, res) => {
   try {
     const chat = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.1-8b-instant",
       messages: [{ role: "user", content: "Reply with just the word READY" }],
     });
     const reply = chat.choices[0].message.content.trim();
@@ -103,10 +110,9 @@ app.get("/test", async (req, res) => {
 // 2. POST /chunk — receive audio blob, transcribe via Groq
 // ──────────────────────────────────────────────────────────
 app.post("/chunk", (req, res) => {
-  // FIX: Catch multer-level errors (Request aborted, file too large, etc.)
   upload.single("audio")(req, res, async (err) => {
     if (err) {
-      console.warn("[chunk] Upload error (likely aborted):", err.message);
+      console.warn("[chunk] Upload error:", err.message);
       return res.status(400).json({ error: err.message });
     }
 
@@ -123,7 +129,7 @@ app.post("/chunk", (req, res) => {
       const result = await groqSTT.transcribeAudio(chunkPath);
       let transcript = result.text ? result.text.trim() : "";
 
-      // ---> NEW FIX: Ignore common Whisper AI hallucinations on silent audio <---
+      // ---> FIX: Ignore common Whisper AI hallucinations on silent audio
       const lowerText = transcript.toLowerCase();
       if (
         lowerText === "thank you." || 
@@ -131,9 +137,9 @@ app.post("/chunk", (req, res) => {
         lowerText === "thanks for watching." ||
         lowerText === "thanks for watching" ||
         lowerText === "thanks." ||
-        lowerText === "you" // sometimes it just says "you"
+        lowerText === "you"
       ) {
-        transcript = ""; // Ignore this chunk because it's a hallucination
+        transcript = ""; 
       }
 
       if (transcript.length > 0) {
@@ -155,16 +161,13 @@ app.post("/screenshot", async (req, res) => {
   try {
     const { base64, timestamp } = req.body;
 
-    // FIX (Bug 2): Gate Vision API call with pixel diff check.
     if (!shouldSendScreenshot(base64, previousScreenshotBase64)) {
       console.log("[screenshot] Skipped — less than 3% pixel change");
       return res.json({ ok: true, skipped: true });
     }
 
-    // Update stored screenshot for next diff comparison
     previousScreenshotBase64 = base64;
 
-    // FIX (Bug 5): Use classifyRegion to pick the right vision prompt.
     const regionType = classifyRegion(base64);
 
     const content = await groqVision.analyzeScreenshot(base64, regionType);
@@ -174,7 +177,6 @@ app.post("/screenshot", async (req, res) => {
     const hasBullets = content.bulletPoints && content.bulletPoints.length > 0;
 
     if (hasTasks || hasDecisions || hasText || hasBullets) {
-      // Summarize instead of dumping raw JSON
       const parts = [];
       if (content.title) parts.push(`Slide: "${content.title}"`);
       if (content.textItems?.length) parts.push(`Screen text: ${content.textItems.slice(0, 5).join(", ")}`);
@@ -205,16 +207,21 @@ app.get("/state", (req, res) => {
 // 5. POST /meeting/end — finalize meeting, run extraction
 // ──────────────────────────────────────────────────────────
 app.post("/meeting/end", async (req, res) => {
-    if (!meetingActive && report) {
+  if (!meetingActive && report) {
     return res.json(report);
   }
   try {
     meetingActive = false;
-
-    // FIX (Bug 1): Stop the rolling extraction timer when meeting ends
     stopRollingExtraction();
 
-    const fullTranscript = rollingTranscript.join("\n");
+    let fullTranscript = rollingTranscript.join("\n");
+
+    // ---> FIX: Hard cap the final report transcript
+    // Keep it under ~16,000 characters to fit Groq free tier
+    if (fullTranscript.length > 16000) {
+      console.log("[meeting/end] Truncating transcript to fit limits...");
+      fullTranscript = fullTranscript.substring(fullTranscript.length - 16000);
+    }
 
     report = await groqExtract.generateFinalReport(fullTranscript);
     if (report && report.actionItems) {
@@ -237,10 +244,7 @@ app.post("/meeting/start", (req, res) => {
   tasks = [];
   report = null;
 
-  // FIX (Bug 2): Reset previous screenshot so first frame is always sent
   previousScreenshotBase64 = null;
-
-  // FIX (Bug 1): Start live rolling extraction
   startRollingExtraction();
 
   console.log("▶  Meeting started");

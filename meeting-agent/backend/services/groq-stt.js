@@ -1,34 +1,29 @@
-// Groq Whisper STT — transcribes 30s audio chunks
+const fs = require("fs");
 const Groq = require("groq-sdk");
-const fs = require("node:fs");
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 async function transcribeAudio(filePath) {
   try {
     const response = await groq.audio.transcriptions.create({
-      model: "whisper-large-v3-turbo",
       file: fs.createReadStream(filePath),
-      response_format: "verbose_json",
-      timestamp_granularities: ["word"],
-      language: "en",
+      // Use the most accurate model (remove '-turbo' if it is there)
+      model: "whisper-large-v3", 
+      // Force English to stop it from getting confused by accents/noise
+      language: "en", 
+      // Give it a hint so it knows how to guess words that get cut in half
+      prompt: "This is a live meeting transcript. The audio may be cut off at the beginning or end.",
+      response_format: "json",
     });
 
-    // Clean up temp file
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    // Clean up the temp file
+    fs.unlinkSync(filePath);
 
     return response;
-  } catch (err) {
-    console.error("[groq-stt] Transcription failed:", err.message);
-
-    // Clean up temp file even on error
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    return { text: "", words: [] };
+  } catch (error) {
+    console.error("[groq-stt] Transcription error:", error.message);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return { text: "" };
   }
 }
 
