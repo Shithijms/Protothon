@@ -147,7 +147,7 @@ function stopScreenshotInterval() {
   }
 }
 
-// ── 3. Caption text from content.js ──────────────────────
+// ── 3. Handle messages from content.js & sidepanel.js ────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CAPTION_TEXT") {
     fetch(`${BACKEND}/caption`, {
@@ -168,6 +168,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Relay agent state to side panel
   if (message.type === "GET_STATE") {
     sendResponse({ agentActive, currentTabId });
+  }
+
+  // NEW: Handle UI button clicks from the side panel
+  if (message.type === "START_AGENT_FROM_UI") {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs[0] && !agentActive) await activateAgent(tabs[0]);
+    });
+    sendResponse({ ok: true });
+  }
+
+  if (message.type === "STOP_AGENT_FROM_UI") {
+    if (agentActive) deactivateAgent();
+    sendResponse({ ok: true });
   }
 
   return true;

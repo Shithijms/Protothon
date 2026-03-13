@@ -280,7 +280,7 @@ body {
   border-radius: 8px;
   padding: 12px;
   min-height: 200px;
-  max-height: 400px;
+  max-height: 500px;
   overflow-y: auto;
   font-size: 12px;
 }
@@ -298,7 +298,7 @@ body {
 .report-section h4 {
   font-size: 12px;
   color: #0f6e56;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .report-section p,
@@ -309,6 +309,68 @@ body {
 
 .report-section ul {
   padding-left: 16px;
+}
+
+/* FIX (Missing feature): Editable task rows in report review step */
+.report-task-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.task-edit-title {
+  flex: 1;
+  min-width: 120px;
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.task-edit-priority {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+  padding: 4px 4px;
+  cursor: pointer;
+}
+
+.task-edit-assignee {
+  width: 90px;
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.task-edit-title:focus,
+.task-edit-priority:focus,
+.task-edit-assignee:focus {
+  outline: 1px solid #0f6e56;
+  border-color: #0f6e56;
+}
+
+.btn-delete-task {
+  background: transparent;
+  border: 1px solid #5c1a1a;
+  border-radius: 4px;
+  color: #ff6b6b;
+  font-size: 10px;
+  padding: 3px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-delete-task:hover {
+  background: #5c1a1a;
 }
 
 .btn-export {

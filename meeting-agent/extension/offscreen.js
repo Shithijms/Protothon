@@ -8,6 +8,13 @@ let chunks = [];
 let stream = null;
 let chunkTimer = null;
 
+// FIX (Missing feature — spec §9): AudioContext keep-alive for Zoom.
+// Zoom mutes tab audio when the browser window loses focus. Routing the
+// captured stream through an AudioContext (even silently) keeps Chrome
+// from treating the tab as silent, preventing Zoom from cutting the feed.
+let audioContext = null;
+let audioSourceNode = null;
+
 // ── Listen for commands from service worker ──────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "START_RECORDING") {
@@ -31,6 +38,14 @@ async function startRecording(streamId) {
         },
       },
     });
+
+    // FIX (Missing feature — spec §9): Create AudioContext and route the
+    // stream through it. The destination is the offscreen document's audio
+    // output (silent to user). This marks the stream as actively consumed
+    // so Zoom and Chrome do not suspend or mute the tab audio track.
+    audioContext = new AudioContext();
+    audioSourceNode = audioContext.createMediaStreamSource(stream);
+    audioSourceNode.connect(audioContext.destination);
 
     createAndStartRecorder();
 
@@ -100,6 +115,16 @@ async function stopRecording() {
     // Send any remaining chunks
     await sendChunksToBackend();
 
+    // FIX (Missing feature — spec §9): Clean up AudioContext keep-alive
+    if (audioSourceNode) {
+      audioSourceNode.disconnect();
+      audioSourceNode = null;
+    }
+    if (audioContext) {
+      await audioContext.close();
+      audioContext = null;
+    }
+
     // Stop all tracks on the stream
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
@@ -126,6 +151,7 @@ async function sendChunksToBackend() {
 
   try {
     const formData = new FormData();
+    // Field name "audio" must match upload.single("audio") in server.js
     formData.append("audio", blob, `chunk_${Date.now()}.webm`);
 
     const res = await fetch(`${BACKEND}/chunk`, {

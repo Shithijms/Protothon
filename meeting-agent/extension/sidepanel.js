@@ -4,7 +4,11 @@ const BACKEND = "http://localhost:3001";
 const POLL_INTERVAL = 5000; // 5 seconds
 
 let lastTranscriptLength = 0;
-let knownTaskIds = new Set();
+let lastTaskCount = 0;
+// FIX (Bug 4): Track whether report has been rendered to avoid re-rendering
+// on every poll cycle. Previously report was never shown because /state did
+// not include it.
+let reportRendered = false;
 
 // ── Tab switching ────────────────────────────────────────
 const tabBtns = document.querySelectorAll(".tab-btn");
@@ -12,11 +16,8 @@ const tabPanels = document.querySelectorAll(".tab-panel");
 
 tabBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
-    // Deactivate all
     tabBtns.forEach((b) => b.classList.remove("active"));
     tabPanels.forEach((p) => p.classList.remove("active"));
-
-    // Activate clicked tab
     btn.classList.add("active");
     const target = document.getElementById(`tab-${btn.dataset.tab}`);
     if (target) target.classList.add("active");
@@ -33,6 +34,27 @@ async function pollState() {
     updateTranscript(state.rollingTranscript);
     updateLiveTasks(state.tasks);
     updateBoard(state.tasks);
+
+    // FIX (Bug 4): Render report when it arrives from /state.
+    // Previously /state never included `report` so this was always null.
+    if (state.report && !reportRendered) {
+      renderReport(state.report);
+      reportRendered = true;
+
+      // Auto-switch to the Report tab when meeting ends and report arrives
+      if (!state.meetingActive) {
+        tabBtns.forEach((b) => b.classList.remove("active"));
+        tabPanels.forEach((p) => p.classList.remove("active"));
+        document.querySelector('[data-tab="report"]').classList.add("active");
+        document.getElementById("tab-report").classList.add("active");
+      }
+    }
+
+    // Reset reportRendered flag when a new meeting starts so next report
+    // is rendered fresh
+    if (state.meetingActive) {
+      reportRendered = false;
+    }
   } catch (err) {
     // Backend might not be running yet — silently retry
   }
@@ -61,7 +83,6 @@ function updateTranscript(lines) {
     })
     .join("");
 
-  // Auto-scroll to bottom
   view.scrollTop = view.scrollHeight;
 }
 
@@ -72,7 +93,7 @@ function updateLiveTasks(tasks) {
   const container = document.getElementById("live-tasks");
   container.innerHTML = "";
 
-  tasks.forEach((task, i) => {
+  tasks.forEach((task) => {
     const card = document.createElement("div");
     card.className = "task-card";
     card.innerHTML = `
@@ -107,7 +128,6 @@ function updateBoard(tasks) {
       ${priorityBadge(task.priority)}
     `;
 
-    // Route to correct column based on status
     const status = (task.status || "todo").toLowerCase();
     if (status === "in-progress" || status === "inprogress") {
       colInProgress.appendChild(card);
@@ -116,6 +136,131 @@ function updateBoard(tasks) {
     } else {
       colTodo.appendChild(card);
     }
+  });
+}
+
+// ── FIX (Bug 4 + Missing feature): Render final report in the Report tab.
+// Previously the Report tab always showed the placeholder because:
+//   1. /state never returned `report`
+//   2. There was no renderReport() function at all
+// This also implements the "Confirm & Notify" flow from spec §7.2 steps 13-15.
+// ─────────────────────────────────────────────────────────
+function renderReport(report) {
+  const view = document.getElementById("report-view");
+  if (!report) return;
+
+  const decisions = (report.keyDecisions || [])
+    .map((d) => `<li><strong>${escapeHtml(d.decision)}</strong>${d.rationale ? " — " + escapeHtml(d.rationale) : ""}</li>`)
+    .join("");
+
+  const openQs = (report.openQuestions || [])
+    .map((q) => `<li>${escapeHtml(q)}</li>`)
+    .join("");
+
+  const highlights = (report.visualHighlights || [])
+    .map((h) => `<li>${escapeHtml(h)}</li>`)
+    .join("");
+
+  // Build editable task rows for the review step
+  const taskRows = (report.actionItems || [])
+    .map((task, i) => `
+      <div class="report-task-row" data-index="${i}">
+        <input class="task-edit-title" value="${escapeHtml(task.title || "")}" data-field="title" data-index="${i}"/>
+        <select class="task-edit-priority" data-field="priority" data-index="${i}">
+          <option value="high"   ${task.priority === "high"   ? "selected" : ""}>High</option>
+          <option value="medium" ${task.priority === "medium" ? "selected" : ""}>Medium</option>
+          <option value="low"    ${task.priority === "low"    ? "selected" : ""}>Low</option>
+        </select>
+        <input class="task-edit-assignee" placeholder="Assignee" value="${escapeHtml(task.assignee || "")}" data-field="assignee" data-index="${i}"/>
+        <button class="btn-delete-task" data-index="${i}" title="Remove task">✕</button>
+      </div>`)
+    .join("");
+
+  view.innerHTML = `
+    <div class="report-section">
+      <h4>📋 ${escapeHtml(report.meetingTitle || "Meeting Report")}</h4>
+      <p>${escapeHtml(report.executiveSummary || "")}</p>
+    </div>
+
+    ${decisions ? `<div class="report-section"><h4>✅ Key Decisions</h4><ul>${decisions}</ul></div>` : ""}
+
+    <div class="report-section">
+      <h4>🎯 Action Items — Review & Edit</h4>
+      <div id="report-task-list">${taskRows}</div>
+    </div>
+
+    ${openQs ? `<div class="report-section"><h4>❓ Open Questions</h4><ul>${openQs}</ul></div>` : ""}
+    ${highlights ? `<div class="report-section"><h4>🖥️ Visual Highlights</h4><ul>${highlights}</ul></div>` : ""}
+
+    <button id="btn-confirm-notify" class="btn-export" style="background:#0f6e56;margin-top:10px">
+      Confirm &amp; Notify Assignees
+    </button>
+  `;
+
+  // Wire up inline edits
+  view.querySelectorAll("[data-field]").forEach((input) => {
+    input.addEventListener("change", (e) => {
+      const idx = parseInt(e.target.dataset.index, 10);
+      const field = e.target.dataset.field;
+      if (report.actionItems && report.actionItems[idx]) {
+        report.actionItems[idx][field] = e.target.value;
+      }
+    });
+  });
+
+  // Wire up task delete buttons
+  view.querySelectorAll(".btn-delete-task").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const idx = parseInt(e.target.dataset.index, 10);
+      if (report.actionItems) {
+        report.actionItems.splice(idx, 1);
+        renderReport(report); // re-render after deletion
+      }
+    });
+  });
+
+  // FIX (Missing feature — spec §7.2 steps 13-15): Confirm & Notify button.
+  // Fires chrome.notifications for each task with an assignee, and opens
+  // a mailto: link with pre-filled subject and body.
+  document.getElementById("btn-confirm-notify").addEventListener("click", () => {
+    const items = report.actionItems || [];
+    const title = report.meetingTitle || "Meeting";
+
+    items.forEach((task) => {
+      if (!task.assignee) return;
+
+      // In-browser notification
+      chrome.notifications.create(`task-${Date.now()}-${Math.random()}`, {
+        type: "basic",
+        iconUrl: "icons/icon48.png",
+        title: `Action for ${task.assignee}`,
+        message: task.title || "New task assigned",
+        priority: 2,
+      });
+
+      // mailto: link — opens in default email client
+      const subject = encodeURIComponent(`Action from ${title}`);
+      const body = encodeURIComponent(
+        `Hi ${task.assignee},\n\nYou have a new action item from the meeting:\n\n` +
+        `Task: ${task.title}\n` +
+        `Priority: ${task.priority || "medium"}\n` +
+        `${task.deadline ? "Deadline: " + task.deadline + "\n" : ""}` +
+        `\nDetails: ${task.description || ""}\n\nThanks`
+      );
+      window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
+    });
+
+    // FIX (Missing feature — spec §7.2 step 16): Persist final report and
+    // tasks to chrome.storage.local so they survive browser restarts.
+    chrome.storage.local.set({
+      lastReport: report,
+      lastTasks: items,
+      lastReportDate: new Date().toISOString(),
+    }, () => {
+      console.log("[sidepanel] Report saved to chrome.storage.local");
+    });
+
+    alert(`Notified ${items.filter((t) => t.assignee).length} assignees.`);
   });
 }
 
@@ -142,7 +287,6 @@ document.getElementById("btn-export").addEventListener("click", async () => {
 });
 
 // ── Helpers ──────────────────────────────────────────────
-
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
