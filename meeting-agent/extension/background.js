@@ -74,8 +74,13 @@ async function activateAgent(tab) {
     }
 
     // Tell offscreen doc to start recording
-    chrome.runtime.sendMessage({ type: "START_RECORDING", streamId });
-
+   // Tell offscreen doc to start recording
+    chrome.runtime.sendMessage({ type: "START_RECORDING", streamId }, () => {
+      // Catch the error if the offscreen doc isn't ready
+      if (chrome.runtime.lastError) {
+        console.warn("[bg] Offscreen doc not ready:", chrome.runtime.lastError.message);
+      }
+    });
     startScreenshotInterval(tab.id);
 
     agentActive = true;
@@ -99,7 +104,14 @@ async function deactivateAgent() {
   try {
     stopScreenshotInterval();
 
-    chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
+stopScreenshotInterval();
+
+    chrome.runtime.sendMessage({ type: "STOP_RECORDING" }, () => {
+      // Catch the error if the offscreen doc is already gone
+      if (chrome.runtime.lastError) {
+        console.warn("[bg] Offscreen doc already closed:", chrome.runtime.lastError.message);
+      }
+    });
 
     // Wait for final chunk to flush
     await new Promise((resolve) => setTimeout(resolve, 600));

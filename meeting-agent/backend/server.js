@@ -104,8 +104,6 @@ app.get("/test", async (req, res) => {
 // ──────────────────────────────────────────────────────────
 app.post("/chunk", (req, res) => {
   // FIX: Catch multer-level errors (Request aborted, file too large, etc.)
-  // Previously an aborted upload crashed the whole handler with an uncaught
-  // "Request aborted" error from multer. Now it's caught and logged cleanly.
   upload.single("audio")(req, res, async (err) => {
     if (err) {
       console.warn("[chunk] Upload error (likely aborted):", err.message);
@@ -123,9 +121,22 @@ app.post("/chunk", (req, res) => {
       fs.renameSync(req.file.path, chunkPath);
 
       const result = await groqSTT.transcribeAudio(chunkPath);
-      const transcript = result.text || "";
+      let transcript = result.text ? result.text.trim() : "";
 
-      if (transcript.trim().length > 0) {
+      // ---> NEW FIX: Ignore common Whisper AI hallucinations on silent audio <---
+      const lowerText = transcript.toLowerCase();
+      if (
+        lowerText === "thank you." || 
+        lowerText === "thank you" || 
+        lowerText === "thanks for watching." ||
+        lowerText === "thanks for watching" ||
+        lowerText === "thanks." ||
+        lowerText === "you" // sometimes it just says "you"
+      ) {
+        transcript = ""; // Ignore this chunk because it's a hallucination
+      }
+
+      if (transcript.length > 0) {
         rollingTranscript.push(transcript);
       }
 
@@ -145,8 +156,6 @@ app.post("/screenshot", async (req, res) => {
     const { base64, timestamp } = req.body;
 
     // FIX (Bug 2): Gate Vision API call with pixel diff check.
-    // Previously every screenshot was sent to Groq Vision regardless of
-    // whether anything had changed, burning free-tier quota.
     if (!shouldSendScreenshot(base64, previousScreenshotBase64)) {
       console.log("[screenshot] Skipped — less than 3% pixel change");
       return res.json({ ok: true, skipped: true });
@@ -156,8 +165,6 @@ app.post("/screenshot", async (req, res) => {
     previousScreenshotBase64 = base64;
 
     // FIX (Bug 5): Use classifyRegion to pick the right vision prompt.
-    // Previously regionType was always hardcoded to "unknown" which fell
-    // back to the whiteboard prompt for every screenshot type.
     const regionType = classifyRegion(base64);
 
     const content = await groqVision.analyzeScreenshot(base64, regionType);
@@ -189,9 +196,6 @@ app.post("/screenshot", async (req, res) => {
 
 // ──────────────────────────────────────────────────────────
 // 4. GET /state — return current meeting state
-// FIX (Bug 4): Added `report` to the response so sidepanel.js can
-// render the Report tab from polling. Previously report was never
-// included and the tab always showed the placeholder text.
 // ──────────────────────────────────────────────────────────
 app.get("/state", (req, res) => {
   res.json({ rollingTranscript, tasks, meetingActive, report });
@@ -226,8 +230,6 @@ app.post("/meeting/end", async (req, res) => {
 
 // ──────────────────────────────────────────────────────────
 // 6. POST /meeting/start — reset state, begin new meeting
-// FIX (Bug 1): Start the rolling extraction timer here so LLaMA runs
-// every 2 minutes during the meeting, not only at meeting end.
 // ──────────────────────────────────────────────────────────
 app.post("/meeting/start", (req, res) => {
   meetingActive = true;

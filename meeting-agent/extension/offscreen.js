@@ -1,8 +1,7 @@
 // Offscreen document — keeps MediaRecorder alive past service worker sleep
 
 const BACKEND = "http://localhost:3001";
-const CHUNK_INTERVAL_MS = 5000; // 5 seconds
-
+const CHUNK_INTERVAL_MS = 30000; 
 let mediaRecorder = null;
 let chunks = [];
 let stream = null;

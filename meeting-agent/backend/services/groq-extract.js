@@ -20,12 +20,14 @@ Schema: { "meetingTitle":"string|null", "estimatedDuration":"string", "attendees
 async function extractFromWindow(transcriptWindow) {
   try {
     const response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      // FIX: Updated to the current, active 8B model on Groq
+      model: "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: WINDOW_SYSTEM_PROMPT },
         { role: "user", content: transcriptWindow },
       ],
       response_format: { type: "json_object" },
+      temperature: 0.2, 
     });
 
     const raw = response.choices[0].message.content;
@@ -47,12 +49,14 @@ async function extractFromWindow(transcriptWindow) {
 async function generateFinalReport(fullTranscript) {
   try {
     const response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      // FIX: Updated to the current, active 8B model on Groq
+      model: "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: FINAL_SYSTEM_PROMPT },
         { role: "user", content: fullTranscript },
       ],
       response_format: { type: "json_object" },
+      temperature: 0.2,
     });
 
     const raw = response.choices[0].message.content;
