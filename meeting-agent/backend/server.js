@@ -102,28 +102,39 @@ app.get("/test", async (req, res) => {
 // ──────────────────────────────────────────────────────────
 // 2. POST /chunk — receive audio blob, transcribe via Groq
 // ──────────────────────────────────────────────────────────
-app.post("/chunk", upload.single("audio"), async (req, res) => {
-  try {
-    const timestamp = Date.now();
-    const chunkPath = path.join(tempDir, `chunk_${timestamp}.webm`);
-
-    // Multer saves to a temp name; rename to our convention
-    fs.renameSync(req.file.path, chunkPath);
-
-    const result = await groqSTT.transcribeAudio(chunkPath);
-    const transcript = result.text || "";
-
-    if (transcript.trim().length > 0) {
-      rollingTranscript.push(transcript);
+app.post("/chunk", (req, res) => {
+  // FIX: Catch multer-level errors (Request aborted, file too large, etc.)
+  // Previously an aborted upload crashed the whole handler with an uncaught
+  // "Request aborted" error from multer. Now it's caught and logged cleanly.
+  upload.single("audio")(req, res, async (err) => {
+    if (err) {
+      console.warn("[chunk] Upload error (likely aborted):", err.message);
+      return res.status(400).json({ error: err.message });
     }
 
-    // Temp file is cleaned up by groqSTT.transcribeAudio
+    if (!req.file) {
+      return res.status(400).json({ error: "No audio file received" });
+    }
 
-    res.json({ ok: true, transcript });
-  } catch (err) {
-    console.error("Chunk error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
+    try {
+      const timestamp = Date.now();
+      const chunkPath = path.join(tempDir, `chunk_${timestamp}.webm`);
+
+      fs.renameSync(req.file.path, chunkPath);
+
+      const result = await groqSTT.transcribeAudio(chunkPath);
+      const transcript = result.text || "";
+
+      if (transcript.trim().length > 0) {
+        rollingTranscript.push(transcript);
+      }
+
+      res.json({ ok: true, transcript });
+    } catch (err) {
+      console.error("Chunk error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
 });
 
 // ──────────────────────────────────────────────────────────
@@ -150,10 +161,23 @@ app.post("/screenshot", async (req, res) => {
     const regionType = classifyRegion(base64);
 
     const content = await groqVision.analyzeScreenshot(base64, regionType);
-    const summary = JSON.stringify(content);
+    const hasTasks = content.tasks && content.tasks.length > 0;
+    const hasDecisions = content.decisions && content.decisions.length > 0;
+    const hasText = content.textItems && content.textItems.length > 0;
+    const hasBullets = content.bulletPoints && content.bulletPoints.length > 0;
 
-    if (summary && summary.length > 2) {
-      rollingTranscript.push(`[VISUAL at ${timestamp}]: ${summary}`);
+    if (hasTasks || hasDecisions || hasText || hasBullets) {
+      // Summarize instead of dumping raw JSON
+      const parts = [];
+      if (content.title) parts.push(`Slide: "${content.title}"`);
+      if (content.textItems?.length) parts.push(`Screen text: ${content.textItems.slice(0, 5).join(", ")}`);
+      if (content.bulletPoints?.length) parts.push(`Points: ${content.bulletPoints.slice(0, 3).join(", ")}`);
+      if (content.tasks?.length) parts.push(`Tasks on screen: ${content.tasks.join(", ")}`);
+
+      const summary = parts.join(". ");
+      if (summary.length > 10) {
+        rollingTranscript.push(`[VISUAL at ${timestamp}]: ${summary}`);
+      }
     }
 
     res.json({ ok: true });
@@ -177,6 +201,9 @@ app.get("/state", (req, res) => {
 // 5. POST /meeting/end — finalize meeting, run extraction
 // ──────────────────────────────────────────────────────────
 app.post("/meeting/end", async (req, res) => {
+    if (!meetingActive && report) {
+    return res.json(report);
+  }
   try {
     meetingActive = false;
 

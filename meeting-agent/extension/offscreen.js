@@ -1,7 +1,7 @@
 // Offscreen document — keeps MediaRecorder alive past service worker sleep
 
 const BACKEND = "http://localhost:3001";
-const CHUNK_INTERVAL_MS = 30000; // 30 seconds
+const CHUNK_INTERVAL_MS = 5000; // 5 seconds
 
 let mediaRecorder = null;
 let chunks = [];
@@ -74,7 +74,7 @@ function createAndStartRecorder() {
     }
   };
 
-  mediaRecorder.start();
+  mediaRecorder.start(1000);
 }
 
 // ── Flush current chunks to backend, then restart ────────
@@ -147,11 +147,15 @@ async function sendChunksToBackend() {
   const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
   chunks = [];
 
-  if (blob.size === 0) return;
+  if (blob.size < 1000) {
+    // FIX: Skip tiny/empty blobs — they cause "Request aborted" on the server
+    // A valid 30s audio chunk is always well above 1KB
+    console.log("[offscreen] Skipping tiny blob:", blob.size, "bytes");
+    return;
+  }
 
   try {
     const formData = new FormData();
-    // Field name "audio" must match upload.single("audio") in server.js
     formData.append("audio", blob, `chunk_${Date.now()}.webm`);
 
     const res = await fetch(`${BACKEND}/chunk`, {

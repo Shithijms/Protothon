@@ -4,10 +4,10 @@ const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const PROMPTS = {
-  whiteboard:
-    'You are reading a screenshot of a whiteboard from an engineering meeting. Extract all text, arrows, shapes, task assignments, and names. Return ONLY valid JSON: { "type":"whiteboard", "textItems":[], "relationships":[], "tasks":[], "names":[], "confidence":"high|medium|low" }',
+whiteboard:
+    'You are reading a screenshot of a whiteboard or shared screen from a meeting. Extract only text, shapes, arrows, and any task assignments visible on screen. Do NOT infer or list people\'s names — only extract text literally written on the screen. Return ONLY valid JSON: { "type":"whiteboard", "textItems":[], "relationships":[], "tasks":[], "confidence":"high|medium|low" }',
   slide:
-    'You are reading a presentation slide. Return ONLY valid JSON: { "type":"slide", "title":"", "bulletPoints":[], "numbers":[], "decisions":[], "confidence":"high|medium|low" }',
+    'You are reading a presentation slide. Extract only the literal text visible on the slide. Do NOT infer speaker names or attendees. Return ONLY valid JSON: { "type":"slide", "title":"", "bulletPoints":[], "numbers":[], "decisions":[], "confidence":"high|medium|low" }',
   code:
     'You are reading a code editor screenshot. Return ONLY valid JSON: { "type":"code", "language":"", "fileName":"", "summary":"", "confidence":"high|medium|low" }',
 };

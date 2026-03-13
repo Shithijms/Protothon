@@ -1,83 +1,134 @@
-// Content script — scrapes live captions from Google Meet and Zoom as fallback
+// content.js — Live caption scraper for Google Meet and Zoom
+// Feeds captions to background.js as fallback when audio capture breaks
 
-let lastCaption = "";
+let lastSentText = "";
+let sendTimer = null;
+let pendingText = "";
+const MIN_CHARS = 2;  
+const DEBOUNCE_MS = 200;
 
-// ── Google Meet caption selectors ────────────────────────
+// ── Google Meet selectors (updated for Meet 2025) ────────
+// Meet renders captions in a div with jsname="ds:0" or similar,
+// but the RELIABLE anchor is the [data-sender-name] attribute on
+// the speaker block, with caption text in the sibling span.
+// We use a broad net of selectors and take the first match.
 const MEET_SELECTORS = [
+  // 2025 Meet — primary caption container
+  '[jsname="YSg9Nc"]',
+  '[jsname="tgaKEf"]',
   '[data-message-text]',
-  '[class*="caption"]',
-  '[aria-label*="captions"]',
-  '[jsname="tgaKEf"]',           // known Meet caption container
-  '.a4cQT',                      // common Meet caption class
+  // caption text spans inside speaker blocks
+  '.iTTPOb',
+  '.bj2rGe',
+  // fallback: any element with aria live caption role
+  '[aria-live="polite"]',
+  '[aria-live="assertive"]',
+  // older Meet selectors kept as last resort
+  '.a4cQT',
+  '.CNusmb',
 ];
 
-// ── Zoom caption selectors ───────────────────────────────
+// ── Zoom selectors ────────────────────────────────────────
 const ZOOM_SELECTORS = [
   '.live-transcription-subtitle',
   '.subtitle-text',
   '[class*="transcription"]',
   '[class*="caption"]',
+  '[class*="subtitle"]',
 ];
 
-// ── Detect which platform we're on ───────────────────────
 const isGoogleMeet = window.location.hostname.includes("meet.google.com");
 const isZoom = window.location.hostname.includes("app.zoom.us");
 
-const selectors = isGoogleMeet ? MEET_SELECTORS : isZoom ? ZOOM_SELECTORS : [...MEET_SELECTORS, ...ZOOM_SELECTORS];
+const SELECTORS = isGoogleMeet
+  ? MEET_SELECTORS
+  : isZoom
+  ? ZOOM_SELECTORS
+  : [...MEET_SELECTORS, ...ZOOM_SELECTORS];
 
-// ── Extract caption text from matched elements ───────────
-function extractCaptionText() {
-  for (const selector of selectors) {
+// ── Extract all visible caption text ─────────────────────
+function extractAllCaptions() {
+  const texts = [];
+
+  for (const selector of SELECTORS) {
     const elements = document.querySelectorAll(selector);
     for (const el of elements) {
-      // Prefer data-message-text attribute (Google Meet)
-      let text = el.getAttribute("data-message-text") || el.textContent || "";
-      text = text.trim();
-
-      if (text.length > 10 && text !== lastCaption) {
-        lastCaption = text;
-        chrome.runtime.sendMessage({
-          type: "CAPTION_TEXT",
-          text: text,
-        });
+      const text =
+        el.getAttribute("data-message-text") ||
+        el.innerText ||
+        el.textContent ||
+        "";
+      const trimmed = text.trim();
+      // FIX: Lower threshold to 3 chars (single words count)
+      // and collect ALL visible caption elements, not just first
+      if (trimmed.length >= 3) {
+        texts.push(trimmed);
       }
     }
   }
+
+  return texts.join(" ").trim();
 }
 
-// ── MutationObserver — watch for caption DOM changes ─────
-const observer = new MutationObserver((mutations) => {
-  let hasRelevantChange = false;
+// ── Debounced send — waits 800ms after last DOM change ───
+// FIX: Meet updates captions character-by-character. If we send on
+// every mutation we get partial words. Debouncing collects the full
+// sentence before sending.
+function scheduleSend(text) {
+  pendingText = text;
+  if (sendTimer) clearTimeout(sendTimer);
 
-  for (const mutation of mutations) {
-    // Check added nodes
-    if (mutation.addedNodes.length > 0) {
-      hasRelevantChange = true;
-      break;
-    }
-    // Check character data changes (text updates in place)
-    if (mutation.type === "characterData") {
-      hasRelevantChange = true;
-      break;
-    }
-  }
+  sendTimer = setTimeout(() => {
+    const toSend = pendingText.trim();
 
-  if (hasRelevantChange) {
-    extractCaptionText();
-  }
+    // Only send if meaningfully different from last sent text
+    // FIX: Use includes() check — if new text contains old text it's
+    // just the same caption grown longer, send the longer version
+    if (
+      toSend.length >= MIN_CHARS &&
+      toSend !== lastSentText &&
+      !lastSentText.includes(toSend)
+    ) {
+      lastSentText = toSend;
+      chrome.runtime.sendMessage(
+        { type: "CAPTION_TEXT", text: toSend },
+        () => {
+          // Consume chrome.runtime.lastError to prevent unchecked error
+          // when background service worker is sleeping
+          void chrome.runtime.lastError;
+        }
+      );
+      console.log("[content] Caption sent:", toSend.substring(0, 60));
+    }
+
+    // Reset lastSentText after 8 seconds so the next speaker's
+    // captions aren't blocked by the previous person's text
+    setTimeout(() => {
+      if (lastSentText === toSend) lastSentText = "";
+    }, 8000);
+  }, DEBOUNCE_MS);
+}
+
+// ── MutationObserver ──────────────────────────────────────
+const observer = new MutationObserver(() => {
+  const text = extractAllCaptions();
+  if (text) scheduleSend(text);
 });
 
-// ── Start observing once DOM is ready ────────────────────
 function startObserving() {
   if (document.body) {
     observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,
+      characterDataOldValue: false,
     });
-    console.log("[content] Caption observer started on", window.location.hostname);
+    console.log("[content] Caption observer active on", window.location.hostname);
+
+    // Run once immediately in case captions are already on screen
+    const initial = extractAllCaptions();
+    if (initial) scheduleSend(initial);
   } else {
-    // Body not ready yet — retry
     setTimeout(startObserving, 500);
   }
 }

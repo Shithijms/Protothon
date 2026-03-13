@@ -9,6 +9,7 @@ let lastTaskCount = 0;
 // on every poll cycle. Previously report was never shown because /state did
 // not include it.
 let reportRendered = false;
+let previouslyActive = false;
 
 // ── Tab switching ────────────────────────────────────────
 const tabBtns = document.querySelectorAll(".tab-btn");
@@ -52,9 +53,36 @@ async function pollState() {
 
     // Reset reportRendered flag when a new meeting starts so next report
     // is rendered fresh
-    if (state.meetingActive) {
-      reportRendered = false;
-    }
+// FIX: When a new meeting starts, clear all displayed content from the
+// previous meeting. Previously only reportRendered was reset but the
+// actual DOM elements (transcript, tasks, board, report view) kept
+// showing stale data from the previous session.
+if (state.meetingActive && !previouslyActive) {
+  reportRendered = false;
+  lastTranscriptLength = 0;
+  lastTaskCount = 0;
+
+  // Clear transcript view
+  const transcriptView = document.getElementById("transcript-view");
+  if (transcriptView) transcriptView.innerHTML = "";
+
+  // Clear live tasks
+  const liveTasks = document.getElementById("live-tasks");
+  if (liveTasks) liveTasks.innerHTML = "";
+
+  // Clear board columns
+  ["col-todo", "col-inprogress", "col-done"].forEach(id => {
+    const col = document.getElementById(id);
+    if (col) col.innerHTML = "";
+  });
+
+  // Reset report tab to placeholder
+  const reportView = document.getElementById("report-view");
+  if (reportView) {
+    reportView.innerHTML = `<p class="placeholder-text">Report will appear after the meeting ends.</p>`;
+  }
+}
+previouslyActive = state.meetingActive;
   } catch (err) {
     // Backend might not be running yet — silently retry
   }

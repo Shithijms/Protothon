@@ -17,15 +17,22 @@ chrome.storage.local.get(["agentActive", "currentTabId"], (data) => {
 });
 
 // ── 1. Agent toggle — extension icon click ───────────────
+// FIX (Error 1): sidePanel.open() MUST be called first, synchronously,
+// before any await. Chrome only allows it inside a direct user gesture.
 chrome.action.onClicked.addListener(async (tab) => {
   if (!agentActive) {
+    // Open side panel FIRST — before any awaits
+    try {
+      await chrome.sidePanel.open({ tabId: tab.id });
+    } catch (e) {
+      console.warn("[bg] sidePanel.open error:", e.message);
+    }
     await activateAgent(tab);
   } else {
     await deactivateAgent();
   }
 });
 
-// ── Activate agent: capture tab, start recording ─────────
 async function activateAgent(tab) {
   try {
     currentTabId = tab.id;
@@ -33,12 +40,29 @@ async function activateAgent(tab) {
     // Tell backend a new meeting started
     await fetch(`${BACKEND}/meeting/start`, { method: "POST" });
 
-    // Get stream ID for the current tab
-    const streamId = await chrome.tabCapture.getMediaStreamId({
-      targetTabId: tab.id,
-    });
+    // FIX (Error 2): "Cannot capture a tab with an active stream."
+    // Close any stale offscreen doc first to release the previous stream.
+    try {
+      await chrome.offscreen.closeDocument();
+      console.log("[bg] Closed stale offscreen doc");
+      await new Promise((r) => setTimeout(r, 300));
+    } catch (_) {
+      // No stale doc — this is fine, ignore
+    }
 
-    // Create offscreen document for MediaRecorder
+    // Get stream ID for the tab
+    let streamId;
+    try {
+      streamId = await chrome.tabCapture.getMediaStreamId({
+        targetTabId: tab.id,
+      });
+    } catch (e) {
+      console.error("[bg] tabCapture failed:", e.message,
+        "\n  If this keeps happening, reload the tab or disable/re-enable the extension.");
+      return;
+    }
+
+    // Create fresh offscreen document
     try {
       await chrome.offscreen.createDocument({
         url: "offscreen.html",
@@ -46,61 +70,54 @@ async function activateAgent(tab) {
         justification: "Recording tab audio for meeting transcription",
       });
     } catch (e) {
-      // Document may already exist from a previous session
-      console.log("[bg] Offscreen doc already exists or error:", e.message);
+      console.log("[bg] Offscreen doc error:", e.message);
     }
 
-    // Tell offscreen document to start recording
-    chrome.runtime.sendMessage({
-      type: "START_RECORDING",
-      streamId: streamId,
-    });
+    // Tell offscreen doc to start recording
+    chrome.runtime.sendMessage({ type: "START_RECORDING", streamId });
 
-    // Open the side panel
-    await chrome.sidePanel.open({ tabId: tab.id });
-
-    // Start screenshot interval
     startScreenshotInterval(tab.id);
 
-    // Persist state
     agentActive = true;
     chrome.storage.local.set({ agentActive: true, currentTabId: tab.id });
 
     console.log("[bg] Agent activated on tab", tab.id);
   } catch (err) {
-    console.error("[bg] Failed to activate agent:", err);
+    // FIX (Error 3): "Failed to fetch" = backend not running
+    if (err.message && err.message.includes("fetch")) {
+      console.error(
+        "[bg] ❌ Backend unreachable at http://localhost:3001\n" +
+        "    Run: cd meeting-agent/backend && node server.js"
+      );
+    } else {
+      console.error("[bg] Failed to activate agent:", err);
+    }
   }
 }
 
-// ── Deactivate agent: stop recording, get report ─────────
 async function deactivateAgent() {
   try {
-    // Stop screenshot interval
     stopScreenshotInterval();
 
-    // Tell offscreen document to stop recording
     chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
 
-    // Small delay to let final chunk flush
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Wait for final chunk to flush
+    await new Promise((resolve) => setTimeout(resolve, 600));
 
-    // Close offscreen document
     try {
       await chrome.offscreen.closeDocument();
     } catch (e) {
       console.log("[bg] Offscreen close error:", e.message);
     }
 
-    // Tell backend meeting ended — get final report
     try {
       const res = await fetch(`${BACKEND}/meeting/end`, { method: "POST" });
       meetingReport = await res.json();
-      console.log("[bg] Meeting report:", meetingReport);
+      console.log("[bg] Meeting report received");
     } catch (e) {
-      console.error("[bg] Failed to get meeting report:", e.message);
+      console.error("[bg] Failed to end meeting:", e.message);
     }
 
-    // Persist state
     agentActive = false;
     currentTabId = null;
     chrome.storage.local.set({ agentActive: false, currentTabId: null });
@@ -111,26 +128,18 @@ async function deactivateAgent() {
   }
 }
 
-// ── 2. Screenshot interval — every 60 seconds ───────────
 function startScreenshotInterval(tabId) {
-  stopScreenshotInterval(); // clear any existing
+  stopScreenshotInterval();
 
   screenshotTimer = setInterval(async () => {
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-        format: "png",
-      });
-
-      // Strip the data:image/png;base64, prefix
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
       const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
 
       await fetch(`${BACKEND}/screenshot`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          base64: base64,
-          timestamp: new Date().toISOString(),
-        }),
+        body: JSON.stringify({ base64, timestamp: new Date().toISOString() }),
       });
 
       console.log("[bg] Screenshot sent");
@@ -147,30 +156,27 @@ function stopScreenshotInterval() {
   }
 }
 
-// ── 3. Handle messages from content.js & sidepanel.js ────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "CAPTION_TEXT") {
+if (message.type === "CAPTION_TEXT") {
+  // FIX: Deduplicate at background level — content.js fires on every
+  // DOM mutation so we may get the same text multiple times in quick
+  // succession even after debouncing.
+  const text = (message.text || "").trim();
+  if (text.length > 0) {
     fetch(`${BACKEND}/caption`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: message.text }),
+      body: JSON.stringify({ text }),
     }).catch((err) => {
       console.error("[bg] Caption forward failed:", err.message);
     });
-    sendResponse({ ok: true });
   }
+  sendResponse({ ok: true });
+}
 
-  // Relay report to side panel if requested
-  if (message.type === "GET_REPORT") {
-    sendResponse({ report: meetingReport });
-  }
+  if (message.type === "GET_REPORT")  sendResponse({ report: meetingReport });
+  if (message.type === "GET_STATE")   sendResponse({ agentActive, currentTabId });
 
-  // Relay agent state to side panel
-  if (message.type === "GET_STATE") {
-    sendResponse({ agentActive, currentTabId });
-  }
-
-  // NEW: Handle UI button clicks from the side panel
   if (message.type === "START_AGENT_FROM_UI") {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs[0] && !agentActive) await activateAgent(tabs[0]);
