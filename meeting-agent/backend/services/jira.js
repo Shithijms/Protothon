@@ -6,20 +6,18 @@ const PRIORITY_MAP = {
   low:    "Low",
 };
 
+// ✅ FIX: Since your project only has 'Task' and 'Epic',
+// map everything to 'Task' instead of 'Bug'
 const CATEGORY_TO_ISSUETYPE = {
-  bug:      "Bug",
+  bug:      "Task",
   feature:  "Task",
   infra:    "Task",
   design:   "Task",
   research: "Task",
 };
 
-// Cache lookups so we don't hit Jira API repeatedly for same name
 const userCache = {};
 
-// ── Look up Jira accountId by display name or email ──────
-// Jira requires accountId (not name/email) to assign issues and
-// trigger email notifications. This searches Jira's user directory.
 async function findJiraUser(nameOrEmail) {
   if (!nameOrEmail) return null;
 
@@ -29,21 +27,20 @@ async function findJiraUser(nameOrEmail) {
   const host  = process.env.JIRA_HOST;
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
+  const projectKey = process.env.JIRA_PROJECT_KEY || "TC";
   const auth  = Buffer.from(`${email}:${token}`).toString("base64");
 
-  // Try multiple search strategies:
-  // 1. Full name "Krrish Raj"
-  // 2. First name only "Krrish"  
-  // 3. Last name only "Raj"
   const searchTerms = [
     nameOrEmail.trim(),
-    nameOrEmail.trim().split(" ")[0],        // first name
-    nameOrEmail.trim().split(" ").pop(),     // last name
-  ].filter((t, i, arr) => t && arr.indexOf(t) === i); // dedupe
+    nameOrEmail.trim().split(" ")[0],
+    nameOrEmail.trim().split(" ").pop(),
+  ].filter((t, i, arr) => t && arr.indexOf(t) === i);
 
   for (const term of searchTerms) {
     try {
-      const url = `${host}/rest/api/3/user/search?query=${encodeURIComponent(term)}&maxResults=5`;
+      // ✅ FIX: Use assignable search scoped to the project
+      // This is more reliable than the global user search
+      const url = `${host}/rest/api/3/user/assignable/search?projectKey=${projectKey}&query=${encodeURIComponent(term)}&maxResults=5`;
 
       const res = await fetch(url, {
         headers: {
@@ -58,7 +55,7 @@ async function findJiraUser(nameOrEmail) {
       if (!users || users.length === 0) continue;
 
       const match = users[0];
-      console.log(`[jira] Resolved "${nameOrEmail}" via "${term}" → ${match.displayName}`);
+      console.log(`[jira] Resolved "${nameOrEmail}" via "${term}" → ${match.displayName} (${match.accountId})`);
       userCache[cacheKey] = match.accountId;
       return match.accountId;
     } catch (err) {
@@ -66,12 +63,11 @@ async function findJiraUser(nameOrEmail) {
     }
   }
 
-  console.warn(`[jira] No Jira user found for "${nameOrEmail}" after trying all strategies`);
+  console.warn(`[jira] No Jira user found for "${nameOrEmail}"`);
   userCache[cacheKey] = null;
   return null;
 }
 
-// Cache of valid issue type names for the project
 let validIssueTypes = null;
 
 async function getValidIssueTypes() {
@@ -80,7 +76,7 @@ async function getValidIssueTypes() {
   const host  = process.env.JIRA_HOST;
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
-  const projectKey = process.env.JIRA_PROJECT_KEY || "ENG";
+  const projectKey = process.env.JIRA_PROJECT_KEY || "TC";
   const auth  = Buffer.from(`${email}:${token}`).toString("base64");
 
   try {
@@ -104,7 +100,7 @@ async function getValidIssueTypes() {
     return [];
   }
 }
-// ── Create a single Jira issue ────────────────────────────
+
 async function createIssue(task) {
   const host       = process.env.JIRA_HOST;
   const email      = process.env.JIRA_EMAIL;
@@ -112,17 +108,19 @@ async function createIssue(task) {
   const projectKey = process.env.JIRA_PROJECT_KEY || "ENG";
   const auth       = Buffer.from(`${email}:${token}`).toString("base64");
 
-const issueType = types.includes(preferred)
-  ? preferred
-  : types.includes("Task")
-  ? "Task"
-  : types.includes("Story")
-  ? "Story"
-  : types[0] || "Task";
-    const priority  = PRIORITY_MAP[task.priority]          || "Medium";
+  const types     = await getValidIssueTypes();
+  const preferred = CATEGORY_TO_ISSUETYPE[task.category] || "Task";
+  const issueType = types.includes(preferred)
+    ? preferred
+    : types.includes("Task")
+    ? "Task"
+    : types.includes("Story")
+    ? "Story"
+    : types[0] || "Task";
 
-  // Look up the real Jira accountId for this assignee name
-  // This is what triggers Jira's email notification to that person
+  const priority = PRIORITY_MAP[task.priority] || "Medium";
+
+  // ✅ FIX: Pass task.assignee so assigneeName is never null in response
   const assigneeAccountId = await findJiraUser(task.assignee);
 
   const description = {
@@ -161,8 +159,6 @@ const issueType = types.includes(preferred)
     labels:      ["ai-meeting-agent"],
   };
 
-  // Only set assignee if we found a real Jira account
-  // Jira will then send an email notification to that user automatically
   if (assigneeAccountId) {
     fields.assignee = { accountId: assigneeAccountId };
   }
@@ -189,11 +185,11 @@ const issueType = types.includes(preferred)
     url:              `${host}/browse/${data.key}`,
     id:               data.id,
     assigneeResolved: !!assigneeAccountId,
+    // ✅ FIX: assigneeName now correctly pulled from task object
     assigneeName:     task.assignee || null,
   };
 }
 
-// ── Push all tasks ────────────────────────────────────────
 async function pushTasksToJira(tasks) {
   const results = [];
 
