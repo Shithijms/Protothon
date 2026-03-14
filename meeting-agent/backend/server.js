@@ -6,12 +6,12 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const Groq = require("groq-sdk");
-
+const { pushTasksToJira } = require("./services/jira");
 const groqSTT = require("./services/groq-stt");
 const groqVision = require("./services/groq-vision");
 const groqExtract = require("./services/groq-extract");
 const { shouldSendScreenshot, classifyRegion } = require("./services/diffEngine");
-
+const { emailReport } = require("./services/mailer");
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
@@ -229,6 +229,14 @@ app.post("/meeting/end", async (req, res) => {
     }
 
     res.json(report);
+    // Email the full report to the team
+try {
+  const jiraResults = report.jiraPushResults || null;
+  await emailReport(report, jiraResults);
+} catch (err) {
+  console.error("[meeting/end] Email failed:", err.message);
+  // Don't fail the whole request if email breaks
+}
   } catch (err) {
     console.error("Meeting end error:", err.message);
     res.status(500).json({ error: err.message });
@@ -267,3 +275,33 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🤖 AI Meeting Agent server running on http://localhost:${PORT}`);
 });
+
+// ──────────────────────────────────────────────────────────
+// 8. POST /api/jira/push — push approved tasks to Jira
+// ──────────────────────────────────────────────────────────
+app.post("/api/jira/push", async (req, res) => {
+  try {
+    const { tasks: tasksTopush } = req.body;
+
+    if (!tasksTopush || tasksTopush.length === 0) {
+      return res.status(400).json({ error: "No tasks provided" });
+    }
+
+    // Check credentials are configured
+    if (!process.env.JIRA_HOST || !process.env.JIRA_API_TOKEN) {
+      return res.status(500).json({
+        error: "Jira not configured. Add JIRA_HOST, JIRA_EMAIL, JIRA_API_TOKEN to .env"
+      });
+    }
+
+    const results = await pushTasksToJira(req.body.tasks);
+    const created = results.filter(r => r.success);
+    const failed  = results.filter(r => !r.success);
+
+    console.log(`[jira] Pushed ${created.length} issues, ${failed.length} failed`);
+    res.json({ ok: true, created, failed });
+  } catch (err) {
+    console.error("[jira] Push error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});//

@@ -220,10 +220,91 @@ function renderReport(report) {
     ${openQs ? `<div class="report-section"><h4>❓ Open Questions</h4><ul>${openQs}</ul></div>` : ""}
     ${highlights ? `<div class="report-section"><h4>🖥️ Visual Highlights</h4><ul>${highlights}</ul></div>` : ""}
 
-    <button id="btn-confirm-notify" class="btn-export" style="background:#0f6e56;margin-top:10px">
+<button id="btn-confirm-notify" class="btn-export" style="background:#0f6e56;margin-top:10px">
       Confirm &amp; Notify Assignees
     </button>
+    <button id="btn-push-jira" class="btn-export" style="background:#0052cc;margin-top:6px">
+      🔵 Push to Jira
+    </button>
+    <div id="jira-results" style="margin-top:8px;font-size:11px;"></div>
   `;
+// ── Push to Jira ────────────────────────────────────────
+document.getElementById("btn-push-jira").addEventListener("click", async () => {
+  const items = (report.actionItems || []).filter(t => t.title);
+  if (items.length === 0) {
+    alert("No action items to push.");
+    return;
+  }
+
+  const btn = document.getElementById("btn-push-jira");
+  const resultsDiv = document.getElementById("jira-results");
+
+  btn.textContent = "Pushing...";
+  btn.disabled = true;
+  resultsDiv.innerHTML = `<span style="color:#aaa">Creating Jira tickets...</span>`;
+
+  try {
+    const res = await fetch(`${BACKEND}/api/jira/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tasks: items }),
+    });
+
+    // FIX: Always parse response even on error
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      throw new Error("Server returned invalid response");
+    }
+
+    if (!res.ok) {
+      resultsDiv.innerHTML = `<span style="color:#ff6b6b">❌ ${escapeHtml(data.error || "Unknown error")}</span>`;
+      btn.textContent = "🔵 Push to Jira";
+      btn.disabled = false;
+      return;
+    }
+
+    // FIX: Guard against missing arrays
+    const created = Array.isArray(data.created) ? data.created : [];
+    const failed  = Array.isArray(data.failed)  ? data.failed  : [];
+
+    const lines = [
+      ...created.map(r => {
+        const assigneeInfo = r.assigneeName
+          ? r.assigneeResolved
+            ? `<span style="color:#66bb6a"> → 📧 ${escapeHtml(r.assigneeName)} notified</span>`
+            : `<span style="color:#ffc107"> → ⚠️ ${escapeHtml(r.assigneeName)} not in Jira</span>`
+          : "";
+        return `<div style="margin:3px 0">
+          ✅ <a href="${escapeHtml(r.url)}" target="_blank"
+               style="color:#4fc3f7">${escapeHtml(r.key)}</a>
+             — ${escapeHtml(r.task)}${assigneeInfo}
+        </div>`;
+      }),
+      ...failed.map(f =>
+        `<div style="color:#ff6b6b;margin:3px 0">
+           ❌ ${escapeHtml(f.task)}: ${escapeHtml(f.error || "Failed")}
+         </div>`
+      ),
+    ];
+
+    resultsDiv.innerHTML = lines.length > 0
+      ? lines.join("")
+      : `<span style="color:#aaa">No results returned</span>`;
+
+    btn.textContent = created.length > 0
+      ? `✅ ${created.length} ticket${created.length > 1 ? "s" : ""} created`
+      : "⚠️ Push failed — see errors above";
+    btn.disabled = false;
+
+  } catch (err) {
+    resultsDiv.innerHTML = `<span style="color:#ff6b6b">❌ ${escapeHtml(err.message)}</span>`;
+    btn.textContent = "🔵 Push to Jira";
+    btn.disabled = false;
+  }
+});
+
 
   // Wire up inline edits
   view.querySelectorAll("[data-field]").forEach((input) => {
@@ -337,3 +418,12 @@ function sourceIcon(source) {
 // ── Start polling ────────────────────────────────────────
 pollState();
 setInterval(pollState, POLL_INTERVAL);
+
+// FIX: Use event delegation for report buttons so they survive re-renders
+document.getElementById("report-view").addEventListener("click", (e) => {
+  // Handle delete task
+  if (e.target.classList.contains("btn-delete-task")) {
+    // Already handled inline — this is just a safety net
+    return;
+  }
+});
